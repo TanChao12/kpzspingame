@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Custom Spin Wheel</title>
+<style>
+  /* Z-INDEX LAYERING MAP:
+   * 1. body (Background Asset)
+   * 2. .decorative-bg (People Asset)
+   * 3. .wheel-container (Canvas & Pointer)
+   * 4. .spin-button (Interactive Layer)
+   * 5. #overlay (Pop-up Alpha Matte Layer)
+   */
+
+  body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* Background locked to top center */
+    background-image: url('images/bg.png');
+    background-repeat: no-repeat;
+    background-position: top center;
+    background-size: cover;
+    background-color: #d4f0f0; 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  /* Unified Stage Wrapper - Anchors everything relative to the top center */
+  .stage-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 500px;
+    height: 750px; /* Gives explicit height to contain all nested absolute elements */
+    margin-top: 50px; /* Adjust this to push the entire rig down from the screen top edge */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* People Graphic Layer - Composited behind the wheel rig */
+  .decorative-bg {
+    position: absolute;
+    top: 290px;
+    width: 100%;
+    max-width: 400px;
+    z-index: 3;
+    pointer-events: none; /* Prevents clicking issues */
+  }
+
+  /* Wheel Rig Container */
+  .wheel-container {
+    position: absolute;
+    top: 290px;
+    width: 400px;
+    height: 400px;
+    z-index: 1;
+  }
+
+  /* Visual Pointer Asset at 12 o'clock (270 degrees in canvas space) */
+  .pointer {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 20px solid transparent;
+    border-right: 20px solid transparent;
+    border-top: 40px solid #4a4e69;
+    z-index: 10;
+    filter: drop-shadow(0 4px 4px rgba(0,0,0,0.2));
+  }
+
+  canvas {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 8px solid #b0c4de;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    transition: transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99); /* Custom graph editor ease */
+  }
+
+  /* Interactive Trigger Button */
+  .spin-button {
+    position: absolute;
+    top: 710px; /* Positioned cleanly below the assets */
+    padding: 15px 40px;
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
+    background-color: #ff9f43;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(255, 159, 67, 0.4);
+    transition: background-color 0.2s, transform 0.1s;
+    z-index: 4;
+  }
+
+  .spin-button:hover {
+    background-color: #fca311;
+  }
+
+  .spin-button:active {
+    transform: scale(0.95);
+  }
+
+  /* Modal Pop-up Styles */
+  #overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.4s ease, visibility 0.4s;
+  }
+
+  .popup-box {
+    background: #ffffff;
+    padding: 40px 60px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    transform: scale(0.7);
+    transition: transform 0.5s cubic-bezier(0.17, 0.67, 0.12, 0.99);
+  }
+
+  #overlay.active {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  #overlay.active .popup-box {
+    transform: scale(1);
+  }
+
+  .popup-box h2 {
+    margin-top: 0;
+    color: #4a4e69;
+    font-size: 24px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .popup-box h1 {
+    color: #ff9f43;
+    font-size: 42px;
+    margin: 15px 0 30px 0;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .close-button {
+    padding: 10px 30px;
+    font-size: 16px;
+    font-weight: bold;
+    color: white;
+    background-color: #4a4e69;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .close-button:hover {
+    background-color: #2b2d42;
+  }
+</style>
+</head>
+<body>
+
+  <div class="stage-wrapper">
+    
+    <img src="images/people.png" class="decorative-bg" alt="People Layout"/>
+
+    <div class="wheel-container">
+      <div class="pointer"></div>
+      <canvas id="wheel" width="400" height="400"></canvas>
+    </div>
+
+    <button class="spin-button" onclick="spin()">SPIN</button>
+
+  </div>
+
+  <div id="overlay">
+    <div class="popup-box">
+      <h2>挑战任务</h2>
+      <h1 id="popupResult">...</h1>
+      <button class="close-button" onclick="closePopup()">接受挑战 (Accept)</button>
+    </div>
+  </div>
+
+<script>
+  const canvas = document.getElementById("wheel");
+  const ctx = canvas.getContext("2d");
+  const overlay = document.getElementById("overlay");
+  const popupResult = document.getElementById("popupResult");
+
+  const segments = [
+    "Bottle flip", "用筷子夹乒乓球", "乒乓弹杯", "硬币平衡柠檬", 
+    "绕口令挑战", "踢毽子", "翻杯挑战", "黑白菜", 
+    "5秒记忆", "吹乒乓球5秒"
+  ];
+  
+  const colors = [
+    "#a8d5ba", "#f9c882", "#8ebae6", "#f2a2a2", 
+    "#c7a3d4", "#a8d5ba", "#f9c882", "#8ebae6", 
+    "#f2a2a2", "#c7a3d4"
+  ];
+
+  let currentRotation = 0;
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radius = canvas.width / 2;
+  let isSpinning = false;
+
+  function drawWheel() {
+    const sliceAngle = (2 * Math.PI) / segments.length;
+
+    for (let i = 0; i < segments.length; i++) {
+      const startAngle = i * sliceAngle;
+      const endAngle = startAngle + sliceAngle;
+
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+      ctx.closePath();
+      ctx.fillStyle = colors[i];
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(startAngle + sliceAngle / 2);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#333";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillText(segments[i], radius - 15, 5); 
+      ctx.restore();
+    }
+    
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius * 0.15, 0, 2 * Math.PI);
+    ctx.fillStyle = "#ffffe0";
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  function spin() {
+    if (isSpinning) return;
+    isSpinning = true;
+    
+    const sliceDegree = 360 / segments.length;
+    const randomExtra = Math.floor(Math.random() * 360);
+    const totalRotation = currentRotation + (360 * 5) + randomExtra;
+    currentRotation = totalRotation;
+
+    canvas.style.transition = "transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99)";
+    canvas.style.transform = `rotate(${currentRotation}deg)`;
+
+    setTimeout(() => {
+      const normalizedDegree = (currentRotation % 360);
+      
+      /* FIXED TRACKING LOGIC:
+       * 12 o'clock pointer sits at 270 degrees in canvas layout space.
+       * Subtract the clockwise rotation transformation to see which slice landed there.
+       * Add 360 before performing modulo operation to avoid negative indices.
+       */
+      const targetDegree = (270 - normalizedDegree + 360) % 360;
+      const winningIndex = Math.floor(targetDegree / sliceDegree);
+      
+      popupResult.innerText = segments[winningIndex];
+      overlay.classList.add("active");
+      
+      isSpinning = false;
+    }, 4000);
+  }
+
+  function closePopup() {
+    overlay.classList.remove("active");
+  }
+
+  drawWheel();
+</script>
+</body>
+</html>
